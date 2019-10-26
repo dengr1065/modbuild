@@ -3,31 +3,76 @@ const fs = require("fs");
 const cfg = require("./modbuild.json");
 const path = require("path");
 
-function build(cont) {
-    var repl = cont;
+const pluginList = fs.readdirSync("./plugins/");
+const plugins = [];
+pluginList.forEach(p => {
+    const plugin = require("./plugins/" + p + "/plugin.js");
+    plugins.push(plugin);
+    plugin.prepare(cfg);
+});
+
+const depFiles = [];
+
+function build(entryPoint) {
+    const rpt = path.join(cfg.src, entryPoint);
+    return processJs(rpt);
+}
+
+function addDep(fpath) {
+    if (!depFiles.includes(fpath)) {
+        depFiles.push(fpath);
+    } else {
+        throw `File ${fpath} was included more than one time!`;
+    }
+}
+
+function processJs(fpath) {
+    addDep(fpath);
+    let repl = fs.readFileSync(fpath, { encoding: "utf-8" });
+    plugins.forEach(pl => {
+        repl = pl.processJs(fpath, repl);
+    });
     const cssmatch = repl.match(/\{ injectcss: "(.*?)" \}/g);
     if (cssmatch) {
         cssmatch.forEach(m => {
             const fn = m.substr(14, m.length - 17);
-            let cssfile = fs.readFileSync(path.join(cfg.src, fn), { encoding: "utf-8" })
-                .replace(/`/g, "\\`");
-            const cssb64match = cssfile.match(/\{base64:"(.*?)"\}/g);
-            if (cssb64match) {
-                cssb64match.forEach(bm => {
-                    const bfn = bm.substr(9, bm.length - 11);
-                    let b64file = fs.readFileSync(path.join(cfg.src, bfn)).toString("base64");
-                    cssfile = cssfile.replace(bm, b64file);
-                });
-            }
+            const cssfile = processCss(path.join(cfg.src, fn)).replace(/`/g, "\\`");
             repl = repl.replace(m, "api.injectCss(`" + cssfile + "`);");
         });
     }
     return repl;
 }
 
+function processCss(fpath) {
+    addDep(fpath);
+    let repl = fs.readFileSync(fpath, { encoding: "utf-8" });
+    plugins.forEach(pl => {
+        repl = pl.processCss(fpath, repl);
+    });
+    const b64match = repl.match(/\{base64:"(.*?)"\}/g);
+    if (b64match) {
+        b64match.forEach(m => {
+            const bfn = m.substr(9, m.length - 11);
+            let b64file = processFile(path.join(cfg.src, bfn));
+            repl = repl.replace(m, b64file);
+        });
+    }
+    return repl;
+}
+
+function processFile(fpath) {
+    let buf = fs.readFileSync(fpath);
+    plugins.forEach(pl => {
+        buf = pl.processFile(fpath, buf);
+    });
+    return buf.toString("base64");
+}
+
 if (process.argv.length >= 3 && process.argv[2].toLowerCase() == "build") {
-    let content = fs.readFileSync(path.join(cfg.src, cfg.modfile), { encoding: "utf-8" });
-    content = build(content).replace("[mb_init]", "");
+    let content = build(cfg.modfile).replace("[mb_init]", "");
+    plugins.forEach(pl => {
+        content = pl.postBuild(content, false);
+    });
     fs.writeFileSync("./" + cfg.outfile, content, { encoding: "utf-8" });
     return;
 }
@@ -35,7 +80,10 @@ if (process.argv.length >= 3 && process.argv[2].toLowerCase() == "build") {
 http.createServer((request, response) => {
     if (request.url == "/mod.js") {
         const src = fs.readFileSync(path.join(cfg.src, cfg.modfile), { encoding: "utf-8" });
-        const content = build(src).replace("[mb_init]", "window._root = root;");
+        let content = build(src).replace("[mb_init]", "window._root = root;");
+        plugins.forEach(pl => {
+            content = pl.postBuild(content, true);
+        });
         response.setHeader("Access-Control-Allow-Origin", "*");
         response.setHeader("Access-Control-Allow-Methods", "GET");
         response.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type");
