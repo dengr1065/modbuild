@@ -1,0 +1,5 @@
+{
+    "src": "./mod",
+    "modfile": "index.js",
+    "outfile": "out.js"
+}
