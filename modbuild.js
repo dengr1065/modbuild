@@ -32,6 +32,14 @@ function processJs(fpath) {
     plugins.forEach(pl => {
         repl = pl.processJs(fpath, repl);
     });
+    const jsmatch = repl.match(/\{ injectjs: "(.*?)" \}/g);
+    if (jsmatch) {
+        jsmatch.forEach(m => {
+            const fn = m.substr(13, m.length - 16);
+            const jsfile = processJs(path.join(cfg.src, fn));
+            repl = repl.replace(m, jsfile);
+        });
+    }
     const cssmatch = repl.match(/\{ injectcss: "(.*?)" \}/g);
     if (cssmatch) {
         cssmatch.forEach(m => {
@@ -49,6 +57,14 @@ function processCss(fpath) {
     plugins.forEach(pl => {
         repl = pl.processCss(fpath, repl);
     });
+    const cssmatch = repl.match(/\{injectcss:"(.*?)"\}/g);
+    if (cssmatch) {
+        cssmatch.forEach(m => {
+            const fn = m.substr(12, m.length - 14);
+            const cssfile = processCss(path.join(cfg.src, fn)).replace(/`/g, "\\`");
+            repl = repl.replace(m, cssfile);
+        });
+    }
     const b64match = repl.match(/\{base64:"(.*?)"\}/g);
     if (b64match) {
         b64match.forEach(m => {
