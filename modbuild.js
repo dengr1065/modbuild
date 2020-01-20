@@ -3,7 +3,10 @@ const fs = require("fs");
 const cfg = require("./modbuild.json");
 const path = require("path");
 
-const pluginList = fs.readdirSync("./plugins/");
+let pluginList = [];
+if (fs.existsSync("./plugins/")) {
+    pluginList = fs.readdirSync("./plugins/");
+}
 const plugins = [];
 pluginList.forEach(p => {
     const plugin = require("./plugins/" + p + "/plugin.js");
@@ -11,10 +14,11 @@ pluginList.forEach(p => {
     plugin.prepare(cfg);
 });
 
-const depFiles = [];
+let depFiles = [];
 
 function build(entryPoint) {
     const rpt = path.join(cfg.src, entryPoint);
+    depFiles = [];
     return processJs(rpt);
 }
 
@@ -22,7 +26,7 @@ function addDep(fpath) {
     if (!depFiles.includes(fpath)) {
         depFiles.push(fpath);
     } else {
-        throw `File ${fpath} was included more than one time!`;
+        throw new Error(`File ${fpath} was included more than one time!`);
     }
 }
 
@@ -48,6 +52,14 @@ function processJs(fpath) {
             repl = repl.replace(m, "api.injectCss(`" + cssfile + "`);");
         });
     }
+    const b64match = repl.match(/\{base64:"(.*?)"\}/g);
+    if (b64match) {
+        b64match.forEach(m => {
+            const bfn = m.substr(9, m.length - 11);
+            let b64file = processFile(path.join(cfg.src, bfn));
+            repl = repl.replace(m, b64file);
+        });
+    }
     return repl;
 }
 
@@ -63,14 +75,6 @@ function processCss(fpath) {
             const fn = m.substr(12, m.length - 14);
             const cssfile = processCss(path.join(cfg.src, fn)).replace(/`/g, "\\`");
             repl = repl.replace(m, cssfile);
-        });
-    }
-    const b64match = repl.match(/\{base64:"(.*?)"\}/g);
-    if (b64match) {
-        b64match.forEach(m => {
-            const bfn = m.substr(9, m.length - 11);
-            let b64file = processFile(path.join(cfg.src, bfn));
-            repl = repl.replace(m, b64file);
         });
     }
     return repl;
@@ -95,8 +99,8 @@ if (process.argv.length >= 3 && process.argv[2].toLowerCase() == "build") {
 
 http.createServer((request, response) => {
     if (request.url == "/mod.js") {
-        const src = fs.readFileSync(path.join(cfg.src, cfg.modfile), { encoding: "utf-8" });
-        let content = build(src).replace("[mb_init]", "window._root = root;");
+        let content = build(cfg.modfile)
+            .replace("[mb_init]", "window._root = root;");
         plugins.forEach(pl => {
             content = pl.postBuild(content, true);
         });
